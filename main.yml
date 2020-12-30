@@ -1,0 +1,151 @@
+---
+- name: Determine login credentials
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: get the username running the deploy
+      become: false
+      local_action: command whoami
+      register: username_on_the_host
+      when: ansible_user is not defined
+      changed_when: false
+
+    - name: "Set ansible_user to {{ username_on_the_host.stdout }}"
+      connection: local
+      set_fact:
+        ansible_user: "{{ username_on_the_host.stdout }}"
+      when: ansible_user is not defined
+
+    - name: Check if connection is possible
+      command: ssh -o User={{ ansible_user }} -o ConnectTimeout=10 -o PreferredAuthentications=publickey -o PubkeyAuthentication=yes {{ inventory_hostname }} echo "Worked"
+      register: result
+      connection: local
+      ignore_errors: yes
+      changed_when: False
+
+    - name: If no connection, change user_name
+      connection: local
+      set_fact:
+        ansible_user: "root"
+        ansible_password: "{{ root_password }}"
+      when: result.failed
+
+- name: Secure servers
+  hosts: all
+  become: true
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Ensure 'sudo' group exists
+      group:
+        name: sudo
+        state: present
+
+    - name: Create users
+      user:
+        name: '{{ item.name }}'
+        shell: /bin/bash
+        password: '!'
+        update_password: on_create
+        groups:
+          - sudo
+        state: present
+      with_items: '{{ users }}'
+
+    - name: Add SSH keys
+      authorized_key:
+        user: '{{ item.name }}'
+        state: present
+        key: '{{ item.sshkeys }}'
+      with_items: '{{ users }}'
+
+    - name: Ensure sudo group is passwordless
+      lineinfile:
+        path: /etc/sudoers.d/sudo-nopasswd
+        line: '%sudo ALL=(ALL) NOPASSWD: ALL'
+        state: present
+        mode: 0440
+        create: yes
+        validate: '/usr/sbin/visudo -cf %s'
+
+    - name: Ensure sudoers uses sudoers.d
+      lineinfile:
+        path: /etc/sudoers
+        line: '#includedir /etc/sudoers.d'
+        state: present
+        validate: '/usr/sbin/visudo -cf %s'
+
+    - name: Disable root login over SSH
+      lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: "^PermitRootLogin"
+        line: "PermitRootLogin no"
+        state: present
+      notify:
+        - restart sshd
+
+    - name: Disable password login
+      lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: "^PasswordAuthentication"
+        line: "PasswordAuthentication no"
+        state: present
+      notify:
+        - restart sshd
+
+  #    - name: "Configuring eth"
+  #      loop: "{{ips}}"
+  #      loop_control:
+  #        loop_var: ip
+  #        index_var: idx
+
+
+  handlers:
+    - name: restart sshd
+      service:
+        name: sshd
+        state: restarted
+
+- name: Setup network
+  hosts: all
+  become: true
+  tasks:
+    - name: add additional ipv4 interfaces
+      blockinfile:
+        block: |
+          {% for ip in additional_ips %}
+          iface eth0 inet static
+              address {{ ip.ipv4 }}
+              netmask 255.255.255.255{% endfor %}
+        marker: "# {mark} additional ipv4 addresses"
+        path: /etc/network/interfaces
+        insertbefore: "^ *dns-search"
+      when: additional_ips is defined
+      notify: restart
+
+    - name: add additional ipv6 interfaces
+      blockinfile:
+        block: |
+          {% for ip in additional_ips %}
+          iface eth0 inet6 static
+              address {{ ip.ipv6 }}
+              netmask 64{% endfor %}
+        path: /etc/network/interfaces
+        marker: "# {mark} additional ipv6 addresses"
+      when: additional_ips is defined
+      notify: restart
+
+    - name: Ensure IPv6 not disabled with sysctl
+      sysctl:
+        name: "{{ item }}"
+        value: 0
+        state: present
+        reload: true
+      with_items:
+        - net.ipv6.conf.all.disable_ipv6
+        - net.ipv6.conf.default.disable_ipv6
+        - net.ipv6.conf.lo.disable_ipv6
+      notify: restart
+  handlers:
+    - name: restart
+      reboot:
