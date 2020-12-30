@@ -1,0 +1,11 @@
+all:
+  hosts:
+    server1:
+      ansible_host: server1_IPv4
+      root_password: initial_root_password
+    server2:
+      ansible_host: server2_IPv4
+      root_password: initial_root_password
+      additional_ips:
+        - ipv4: server2_additional_IPv4
+          ipv6: server2_additional_IPv6
