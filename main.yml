@@ -23,6 +23,11 @@
       ignore_errors: yes
       changed_when: False
 
+    - name: "Store ansible_user for later use."
+      set_fact:
+        ansible_user_orig: "{{ ansible_user }}"
+      when: result.failed
+
     - name: If no connection, change user_name
       connection: local
       set_fact:
@@ -98,7 +103,16 @@
   #      loop_control:
   #        loop_var: ip
   #        index_var: idx
+  post_tasks:
+    - name: Restore original ansible_user
+      set_fact:
+        ansible_user: "{{ ansible_user_orig }}"
+      when: ansible_user_orig is defined
 
+    - name: remove ansible password
+      set_fact:
+        ansible_password:
+      when: ansible_user_orig is defined
 
   handlers:
     - name: restart sshd
