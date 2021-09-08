@@ -17,7 +17,7 @@
       when: ansible_user is not defined
 
     - name: Check if connection is possible
-      command: ssh -o User={{ ansible_user }} -o ConnectTimeout=10 -o PreferredAuthentications=publickey -o PubkeyAuthentication=yes {{ inventory_hostname }} echo "Worked"
+      command: ssh -o User={{ ansible_user }} -o ConnectTimeout=10 -o PreferredAuthentications=publickey -o PubkeyAuthentication=yes {{ ansible_host }} echo "Worked"
       register: result
       connection: local
       ignore_errors: yes
